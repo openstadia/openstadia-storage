@@ -1,6 +1,6 @@
 package models
 
-type DeleteFile struct {
+type DeleteFiles struct {
 	Paths []string `json:"path"`
 }
 
@@ -9,7 +9,8 @@ type GetFile struct {
 }
 
 type UnsuccessfulFileOperation struct {
-	Path string `json:"path"`
+	Path  string `json:"path"`
+	Error error  `json:"error"`
 }
 
 type UnsuccessfulFileOperationsList struct {

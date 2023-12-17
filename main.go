@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"github.com/openstadia/openstadia-storage/configuration"
 	"github.com/openstadia/openstadia-storage/connection/connections"
 	"github.com/openstadia/openstadia-storage/connection/routing"
@@ -8,17 +9,15 @@ import (
 )
 
 func main() {
-	if !configuration.Init() {
-		// some important settings are not set, no reason to continue
-		return
-	}
-	err := connections.InitMinioClients()
+	configStore, err := configuration.Load()
 	if err != nil {
-		log.Fatalln(err)
+		log.Fatalln(fmt.Errorf("failed to load the config: %w", err))
 	}
-	//err = connections.StartBoltDb()
-	//if err != nil {
-	//	log.Fatalln(err)
-	//}
-	routing.RegisterEndpoints() // blocking call
+
+	connectionsStore, err := connections.InitAllConnections(configStore)
+	if err != nil {
+		log.Fatalln(fmt.Errorf("failed to init connections: %w", err))
+	}
+
+	routing.RegisterEndpoints(configStore, connectionsStore) // blocking call
 }

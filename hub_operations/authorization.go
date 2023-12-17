@@ -2,17 +2,17 @@ package hub_operations
 
 import (
 	"encoding/json"
-	"errors"
+	"fmt"
 	"github.com/openstadia/openstadia-storage/configuration"
 	"github.com/openstadia/openstadia-storage/models"
 	"net/http"
 )
 
-func Authorize(auth string) (*models.HubUser, error) {
+func Authorize(auth string, store *configuration.ConfigStore) (*models.HubUser, error) {
 	client := http.Client{}
-	req, err := http.NewRequest("GET", configuration.Settings.HubDomain+"/users/me", nil)
+	req, err := http.NewRequest("GET", fmt.Sprintf("%s/users/me", store.GetHubSettings().HubDomain), nil)
 	if err != nil {
-		return nil, errors.New("Error on http.NewRequest():\n" + err.Error())
+		return nil, fmt.Errorf("failure on creating a new request: %w", err)
 	}
 
 	req.Header = http.Header{}
@@ -20,7 +20,7 @@ func Authorize(auth string) (*models.HubUser, error) {
 
 	res, err := client.Do(req)
 	if err != nil {
-		return nil, errors.New("Error on client.Do(request):\n" + err.Error())
+		return nil, fmt.Errorf("failure on creating a sending a request: %w", err)
 	}
 
 	var u models.HubUser

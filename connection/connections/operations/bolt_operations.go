@@ -1,23 +1,14 @@
-package bolt_operations
-
-import (
-	"github.com/boltdb/bolt"
-	//"github.com/openstadia/openstadia-storage/connection/connections"
-	"github.com/openstadia/openstadia-storage/connection/connections/operations/minio_operations"
-	"github.com/openstadia/openstadia-storage/models"
-	//"log"
-	//"strconv"
-)
+package operations
 
 // unfinished, new update
 
-func createBoltBucketIfNotExists(u *models.HubUser, tx *bolt.Tx) error {
-	_, err := tx.CreateBucketIfNotExists([]byte(minio_operations.GetUserBucketName(u)))
-	if err != nil {
-		return err
-	}
-	return nil
-}
+//func createBoltBucketIfNotExists(u *models.HubUser, tx *bolt.Tx) error {
+//	_, err := tx.CreateBucketIfNotExists([]byte(minio_operations.GetUserBucketName(u)))
+//	if err != nil {
+//		return err
+//	}
+//	return nil
+//}
 
 //func GetUserQuota(u *models.HubUser) (uint64, error) {
 //	err := connections.Database.Update(func(tx *bolt.Tx) error {

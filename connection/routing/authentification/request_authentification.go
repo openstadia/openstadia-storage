@@ -2,6 +2,9 @@ package authentification
 
 import (
 	"encoding/json"
+	"fmt"
+	"github.com/openstadia/openstadia-storage/configuration"
+	"github.com/openstadia/openstadia-storage/connection/connections"
 	"github.com/openstadia/openstadia-storage/connection/crud"
 	"github.com/openstadia/openstadia-storage/hub_operations"
 	"github.com/openstadia/openstadia-storage/models"
@@ -9,44 +12,44 @@ import (
 	"net/http"
 )
 
-type AuthenticatedHandler func(http.ResponseWriter, *http.Request, *models.HubUser)
+type AuthenticatedHandler func(http.ResponseWriter, *http.Request, *models.User, *configuration.ConfigStore, *connections.ConnectionsStore)
 
 type EnsureAuth struct {
-	handler AuthenticatedHandler
+	handler          AuthenticatedHandler
+	configStore      *configuration.ConfigStore
+	connectionsStore *connections.ConnectionsStore
 }
 
 func (ea *EnsureAuth) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	u, err := hub_operations.Authorize(r.Header.Get("Authorization"))
-	if err != nil {
-		log.Println("An error on authorizing:\n" + err.Error())
+	w.Header().Set("Content-Type", "application/json")
+	u, err := hub_operations.Authorize(r.Header.Get("Authorization"), ea.configStore)
+	if err != nil || u == nil {
+		if err != nil { // a real internal error
+			log.Println(fmt.Errorf("failed to authorize a request: %w", err))
+			w.WriteHeader(http.StatusInternalServerError)
+		} else { // bad credentials
+			resp, _ := json.Marshal(map[string]string{"details": "Bad credentials"})
+			_, err = w.Write(resp)
+			if err != nil {
+				log.Println(fmt.Errorf("failed to write an bad credentials authorizatioon response: %w", err))
+			}
+		}
+		return
 	}
-	userInfo := crud.GetStorageUserInfo(u)
+
+	localUser := models.User{Id: u.Id}
+
+	userInfo := crud.GetStorageUserInfo(&localUser)
 	if !userInfo.StorageFeatureAllowed {
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	if err != nil || u == nil {
-		var details string
-		if err == nil {
-			details = "Bad credentials"
-		} else {
-			println(err.Error())
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
 
-		resp, _ := json.Marshal(map[string]string{"details": details})
-		_, err := w.Write(resp)
-		if err != nil {
-			log.Fatalln(err.Error())
-		}
-		return
-	}
+	localUser.UserInfo = userInfo
 
-	ea.handler(w, r, u)
+	ea.handler(w, r, &localUser, ea.configStore, ea.connectionsStore)
 }
 
-func NewEnsureAuth(handlerToWrap AuthenticatedHandler) *EnsureAuth {
-	return &EnsureAuth{handlerToWrap}
+func NewEnsureAuth(handlerToWrap AuthenticatedHandler, store *configuration.ConfigStore, connectionsStore *connections.ConnectionsStore) *EnsureAuth {
+	return &EnsureAuth{handler: handlerToWrap, configStore: store, connectionsStore: connectionsStore}
 }

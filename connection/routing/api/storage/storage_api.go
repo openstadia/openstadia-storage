@@ -1,31 +1,32 @@
 package storage
 
 import (
+	"fmt"
 	"github.com/gorilla/mux"
-	//"github.com/openstadia/openstadia-storage/connection/connections/operations/bolt_operations"
-	"github.com/openstadia/openstadia-storage/connection/connections/operations/minio_operations"
-	"github.com/openstadia/openstadia-storage/connection/routing/api"
+	"github.com/openstadia/openstadia-storage/configuration"
+	"github.com/openstadia/openstadia-storage/connection/connections"
+	"github.com/openstadia/openstadia-storage/connection/connections/operations"
 	"github.com/openstadia/openstadia-storage/connection/routing/authentification"
 	"github.com/openstadia/openstadia-storage/models"
+	"github.com/openstadia/openstadia-storage/utils"
 	"log"
 	"net/http"
 )
 
-func SetUpStorageRouter() *mux.Router {
+func SetUpStorageRouter(configStore *configuration.ConfigStore, connectionsStore *connections.ConnectionsStore) *mux.Router {
 	r := mux.NewRouter()
-	r.Handle("/files_list", authentification.NewEnsureAuth(getFilesList)).Methods("GET")
-	r.Handle("/storage_info", authentification.NewEnsureAuth(getOnlyGeneralStorageInfo)).Methods("GET")
-	r.Handle("/file_download", authentification.NewEnsureAuth(getFile)).Methods("POST")
-	r.Handle("/file", authentification.NewEnsureAuth(deleteFile)).Methods("DELETE")
-	r.Handle("/file", authentification.NewEnsureAuth(uploadFile)).Methods("POST")
-	//r.Handle("/test", authentification.NewEnsureAuth(test1)).Methods("GET")
+	r.Handle("/files_list", authentification.NewEnsureAuth(getFilesList, configStore, connectionsStore)).Methods("GET")
+	r.Handle("/storage_info", authentification.NewEnsureAuth(getBucketStorageInfo, configStore, connectionsStore)).Methods("GET")
+	r.Handle("/file_download", authentification.NewEnsureAuth(getFile, configStore, connectionsStore)).Methods("POST")
+	r.Handle("/file", authentification.NewEnsureAuth(deleteFile, configStore, connectionsStore)).Methods("DELETE")
+	r.Handle("/file", authentification.NewEnsureAuth(uploadFile, configStore, connectionsStore)).Methods("POST")
 	return r
 }
 
-func checkStorageExists(w http.ResponseWriter, u *models.HubUser) bool {
-	exists, err := minio_operations.BucketExists(u)
+func checkStorageExists(w http.ResponseWriter, u *models.User, connectionsStore *connections.ConnectionsStore) bool {
+	exists, err := operations.BucketExists(u, connectionsStore)
 	if err != nil {
-		log.Println("Error at checking if a bucket exists:\n" + err.Error())
+		log.Println(fmt.Errorf("failed to checking if a bucket exists: %w", err))
 		w.WriteHeader(http.StatusInternalServerError)
 		return false
 	}
@@ -35,118 +36,91 @@ func checkStorageExists(w http.ResponseWriter, u *models.HubUser) bool {
 	return exists
 }
 
-func tryToCreateStorage(w http.ResponseWriter, u *models.HubUser) bool {
-	err := minio_operations.CreateBucketIfNeeded(u)
+func tryToCreateStorage(w http.ResponseWriter, u *models.User, connectionsStore *connections.ConnectionsStore) bool {
+	err := operations.CreateBucketAndQuotaIfNeeded(u, connectionsStore)
 	if err != nil {
-		log.Println("Error at creating a bucket:\n" + err.Error())
+		log.Println(fmt.Errorf("failed to create a bucket: %w", err))
 		w.WriteHeader(http.StatusInternalServerError)
 		return false
 	}
 	return true
 }
 
-func getFilesList(w http.ResponseWriter, _ *http.Request, u *models.HubUser) {
-	if !tryToCreateStorage(w, u) {
+func getFilesList(w http.ResponseWriter, _ *http.Request, u *models.User, _ *configuration.ConfigStore, connectionsStore *connections.ConnectionsStore) {
+	if !tryToCreateStorage(w, u, connectionsStore) {
 		return
 	}
-	list, err := minio_operations.GetUserFilesList(u)
+	list, err := operations.GetUserFilesList(u, connectionsStore)
 	if err != nil {
-		log.Println("Error at GetUserFilesList:\n" + err.Error())
+		log.Println(fmt.Errorf("failed to get files list: %w", err))
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 
-	quota, err := minio_operations.GetBucketQuota(u)
+	utils.EncodeToResponse(w, list)
+}
+
+func getBucketStorageInfo(w http.ResponseWriter, _ *http.Request, u *models.User, _ *configuration.ConfigStore, connectionsStore *connections.ConnectionsStore) {
+	if !tryToCreateStorage(w, u, connectionsStore) {
+		return
+	}
+	info, err := operations.GetBucketStorageInfo(u, connectionsStore)
 	if err != nil {
-		log.Println("Error at GetBucketQuota:\n" + err.Error())
+		log.Println(fmt.Errorf("failed to get storage info: %w", err))
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	list.TotalSpace = quota.Quota
 
-	api.EncodeToResponse(w, list)
+	utils.EncodeToResponse(w, info)
 }
 
-func getOnlyGeneralStorageInfo(w http.ResponseWriter, _ *http.Request, u *models.HubUser) {
-	if !tryToCreateStorage(w, u) {
-		return
-	}
-	info, err := minio_operations.GetGeneralStorageInfo(u)
-	if err != nil {
-		log.Println("Error at getting storage info:\n" + err.Error())
-		return
-	}
-
-	api.EncodeToResponse(w, info)
-}
-
-func getFile(w http.ResponseWriter, r *http.Request, u *models.HubUser) {
-	if !tryToCreateStorage(w, u) {
+func getFile(w http.ResponseWriter, r *http.Request, u *models.User, configStore *configuration.ConfigStore, connectionsStore *connections.ConnectionsStore) {
+	if !tryToCreateStorage(w, u, connectionsStore) {
 		return
 	}
 	var file models.GetFile
-	if !api.DecodeBody(w, r, &file) {
+	if !utils.DecodeBody(w, r, &file) {
 		return
 	}
-	url, err := minio_operations.GetFile(u, file)
+	url, err := operations.GetFile(u, file, configStore, connectionsStore)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
 
-	api.EncodeToResponse(w, models.GetFileLink{Url: url.String()})
+	utils.EncodeToResponse(w, models.GetFileLink{Url: url.String()})
 }
 
-func deleteFile(w http.ResponseWriter, r *http.Request, u *models.HubUser) {
-	if !checkStorageExists(w, u) {
+func deleteFile(w http.ResponseWriter, r *http.Request, u *models.User, _ *configuration.ConfigStore, connectionsStore *connections.ConnectionsStore) {
+	if !checkStorageExists(w, u, connectionsStore) {
 		return
 	}
-	var files models.DeleteFile
-	if !api.DecodeBody(w, r, &files) {
+	var files models.DeleteFiles
+	if !utils.DecodeBody(w, r, &files) {
 		return
 	}
 
-	// | working way |
-	failed, exactErrors := minio_operations.DeleteFiles(u, files)
-	if failed != nil && len(failed) != 0 {
-		for _, value := range exactErrors {
-			log.Println("Error at deleting file(s):\n" + value.Error())
+	failed := operations.DeleteFiles(u, connectionsStore, files)
+	if failed.List != nil && len(failed.List) != 0 {
+		for _, failedOperation := range failed.List {
+			log.Println(fmt.Errorf("failed to delete file \"%s\": %w", failedOperation.Path, failedOperation.Error))
 		}
 	}
 
-	api.EncodeToResponse(w, models.UnsuccessfulFileOperationsList{List: failed})
-
-	// | broken way |
-	//failed, exactErrors := minio_operations.BROKEN_DeleteMultipleFiles(u, files)
-	//if failed != nil && len(failed) != 0 {
-	//	for _, value := range exactErrors {
-	//		log.Println(value.Error())
-	//	}
-	//	err := json.NewEncoder(w).Encode(failed)
-	//	if err != nil {
-	//		log.Println("Error at encoding the deleteFile response:\n" + err.Error())
-	//		w.WriteHeader(http.StatusInternalServerError)
-	//	}
-	//	return
-	//}
-
+	utils.EncodeToResponse(w, failed)
 }
 
-func uploadFile(w http.ResponseWriter, r *http.Request, u *models.HubUser) {
-	if !checkStorageExists(w, u) {
+func uploadFile(w http.ResponseWriter, r *http.Request, u *models.User, configStore *configuration.ConfigStore, connectionsStore *connections.ConnectionsStore) {
+	if !checkStorageExists(w, u, connectionsStore) {
 		return
 	}
 	var file models.UploadFile
-	if !api.DecodeBody(w, r, &file) {
+	if !utils.DecodeBody(w, r, &file) {
 		return
 	}
-	url, err := minio_operations.UploadFile(u, file)
+	url, err := operations.UploadFile(u, file, configStore, connectionsStore)
 	if err != nil {
 		return
 	}
-	api.EncodeToResponse(w, models.UploadFileLink{Url: url.String()})
+	utils.EncodeToResponse(w, models.UploadFileLink{Url: url.String()})
 }
-
-//func test1(w http.ResponseWriter, r *http.Request, u *models.HubUser) {
-//	bolt_operations.GetUserQuota(u)
-//}

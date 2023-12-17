@@ -1,8 +1,10 @@
 package crud
 
-import "github.com/openstadia/openstadia-storage/models"
+import (
+	"github.com/openstadia/openstadia-storage/models"
+)
 
-func GetStorageUserInfo(u *models.HubUser) models.StorageUserInfo {
+func GetStorageUserInfo(_ *models.User) models.StorageUserInfo {
 	// placeholder
-	return models.StorageUserInfo{AllowedTotalSpace: 1024 * 1024 * 1024, StorageFeatureAllowed: true} // 1GB
+	return models.StorageUserInfo{TotalSpaceAvailable: 0, StorageFeatureAllowed: false}
 }
